@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat</title>
+
+  <style>
+    :root{
+      --bg: #efeae2;
+      --panel: #ffffff;
+      --text: #111;
+      --muted: #667085;
+      --me: #dcf8c6;
+      --them: #ffffff;
+      --border: #e5e7eb;
+    }
+
+    body{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    #chat{
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #topbar{
+      padding: 10px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    #status{
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    #messages{
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .bubble{
+      max-width: 72%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      line-height: 1.3;
+      word-wrap: break-word;
+      box-shadow: 0 1px 0 rgba(0,0,0,.06);
+    }
+
+    .bubble.me{
+      align-self: flex-end;
+      background: var(--me);
+      border-top-right-radius: 6px;
+    }
+
+    .bubble.them{
+      align-self: flex-start;
+      background: var(--them);
+      border-top-left-radius: 6px;
+    }
+
+    .meta{
+      margin-top: 4px;
+      font-size: 11px;
+      color: rgba(0,0,0,.55);
+      text-align: right;
+      user-select: none;
+    }
+
+    #composer{
+      padding: 10px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #msg{
+      flex: 1;
+      font-size: 15px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      outline: none;
+      min-width: 180px;
+    }
+
+    #send, #uploadBtn{
+      border: none;
+      color: white;
+      padding: 10px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    #send{ background: #25d366; }
+    #uploadBtn{ background: #0b74ff; }
+
+    #send:disabled, #uploadBtn:disabled{
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    #file{
+      max-width: 220px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="chat">
+    <div id="topbar">
+      <div>
+        <div style="font-weight:700">Chat</div>
+        <div id="status">Disconnected</div>
+      </div>
+
+      <div style="font-size:12px;color:var(--muted)">
+        Room: <span id="roomLabel"></span> | Role: <span id="roleLabel"></span>
+      </div>
+    </div>
+
+    <div id="messages" aria-live="polite"></div>
+
+    <div id="composer">
+      <input id="msg" placeholder="Type a message…" autocomplete="off" />
+
+      <!-- Upload UI -->
+      <input id="file" type="file" />
+      <button id="uploadBtn">Upload</button>
+
+      <button id="send">Send</button>
+    </div>
+  </div>
+
+  <script src="https://chat-server-orzm.onrender.com/socket.io/socket.io.js"></script>
+
+  <script>
+    const SERVER_URL = "https://chat-server-orzm.onrender.com";
+    const room = "room-123";
+    const role = "B";
+
+    // ngrok upload tunnel (Agent laptop)
+    const UPLOAD_BASE = "https://natisha-flamy-lonely.ngrok-free.dev";
+
+    document.getElementById("roomLabel").textContent = room;
+    document.getElementById("roleLabel").textContent = role;
+
+    const messagesEl = document.getElementById("messages");
+    const statusEl = document.getElementById("status");
+    const inputEl = document.getElementById("msg");
+    const sendBtn = document.getElementById("send");
+
+    const fileEl = document.getElementById("file");
+    const uploadBtn = document.getElementById("uploadBtn");
+
+    const socket = io(SERVER_URL);
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function addBubble(side, text, ts = Date.now()) {
+      const bubble = document.createElement("div");
+      bubble.className = `bubble ${side}`;
+
+      const body = document.createElement("div");
+      body.textContent = text;
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      bubble.appendChild(body);
+      bubble.appendChild(meta);
+
+      messagesEl.appendChild(bubble);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function sendCurrent() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+
+      addBubble("me", text);
+      socket.emit("chat", { room, text });
+      inputEl.value = "";
+      inputEl.focus();
+    }
+
+    async function uploadCurrentFile() {
+      if (!fileEl.files || fileEl.files.length === 0) {
+        addBubble("me", "No file selected.");
+        return;
+      }
+
+      const f = fileEl.files[0];
+
+      uploadBtn.disabled = true;
+      try {
+        const fd = new FormData();
+        fd.append("file", f); // input.files gives selected File objects [web:358]
+
+        const resp = await fetch(`${UPLOAD_BASE}/upload`, {
+          method: "POST",
+          body: fd
+        });
+
+        if (!resp.ok) {
+          throw new Error(`Upload failed: HTTP ${resp.status}`);
+        }
+
+        const out = await resp.json();
+
+        addBubble("me", `Uploaded: ${out.originalName} (${out.bytes} bytes)`);
+        socket.emit("chat", { room, text: `File uploaded: ${out.originalName}` });
+
+        fileEl.value = "";
+      } catch (err) {
+        addBubble("me", `Upload error: ${err.message}`);
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    }
+
+    socket.on("connect", () => {
+      setStatus("Connected");
+      socket.emit("join", { room, role });
+    });
+
+    socket.on("disconnect", () => setStatus("Disconnected"));
+
+    socket.on("chat", (m) => {
+      addBubble("them", m.text, m.ts);
+    });
+
+    sendBtn.addEventListener("click", sendCurrent);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendCurrent();
+    });
+
+    uploadBtn.addEventListener("click", uploadCurrentFile);
+  </script>
+</body>
+</html>
