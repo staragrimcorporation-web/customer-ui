@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Chat (Agent)</title>
+  <title>Chat (Customer)</title>
 
   <style>
     :root{
@@ -24,7 +24,7 @@
     }
 
     #chat{
-      height: 100vh;
+      height: 100dvh; /* better on mobile dynamic toolbars [web:585] */
       display: flex;
       flex-direction: column;
     }
@@ -90,9 +90,8 @@
       user-select: none;
     }
 
-    /* Group: keeps transcript bubble exactly same width as voice bubble */
     .group{
-      display: inline-block; /* shrink-wrap width to content (audio) */
+      display: inline-block;
       max-width: 72%;
     }
     .group.me{ align-self: flex-end; }
@@ -105,39 +104,25 @@
       box-shadow: 0 1px 0 rgba(0,0,0,.06);
     }
 
-    /* WhatsApp-like attached stacking */
-    .group .bubble.inGroup{
-      margin: 0;
-    }
+    .group .bubble.inGroup{ margin: 0; }
     .group .bubble.inGroup + .bubble.inGroup{
-      margin-top: 2px;     /* small seam; set 0 for fully fused */
-      box-shadow: none;    /* makes it feel like one message */
+      margin-top: 2px;
+      box-shadow: none;
     }
 
-    /* Flatten touching corners so they look “attached” */
-    .group.me .bubble.inGroup:first-child{
-      border-bottom-right-radius: 6px;
-    }
-    .group.me .bubble.inGroup:last-child{
-      border-top-right-radius: 6px;
-    }
+    .group.me .bubble.inGroup:first-child{ border-bottom-right-radius: 6px; }
+    .group.me .bubble.inGroup:last-child{  border-top-right-radius: 6px; }
 
-    .group.them .bubble.inGroup:first-child{
-      border-bottom-left-radius: 6px;
-    }
-    .group.them .bubble.inGroup:last-child{
-      border-top-left-radius: 6px;
-    }
+    .group.them .bubble.inGroup:first-child{ border-bottom-left-radius: 6px; }
+    .group.them .bubble.inGroup:last-child{  border-top-left-radius: 6px; }
 
-    /* Audio control */
     audio{
-      width: 320px;
-      max-width: 100%;
+      width: 100%;
+      max-width: 360px;
       height: 36px;
       display: block;
     }
 
-    /* Transcript disclosure */
     .tx > summary{
       cursor: pointer;
       user-select: none;
@@ -160,7 +145,7 @@
 
     .transcript{
       margin-top: 6px;
-      white-space: pre-wrap; /* keeps line breaks, wraps within width [web:554] */
+      white-space: pre-wrap;
     }
 
     #composer{
@@ -203,6 +188,35 @@
     #file{
       max-width: 220px;
       font-size: 13px;
+    }
+
+    @media (max-width: 520px){
+      #messages{
+        padding: 10px 8px;
+        gap: 6px;
+      }
+
+      .bubble{ max-width: 92%; }
+      .group{ max-width: 92%; }
+
+      #composer{
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      #msg{
+        flex: 1 1 100%;
+        min-width: 0;
+      }
+
+      #file{
+        flex: 1 1 100%;
+        max-width: 100%;
+      }
+
+      #uploadBtn, #send{
+        flex: 1 1 calc(50% - 4px);
+      }
     }
   </style>
 </head>
@@ -277,7 +291,6 @@
       const group = document.createElement("div");
       group.className = `group ${side}`;
 
-      // Voice bubble (has timestamp)
       const voice = document.createElement("div");
       voice.className = `bubble ${side} inGroup`;
 
@@ -299,7 +312,6 @@
       voice.appendChild(meta);
       group.appendChild(voice);
 
-      // Transcript bubble (NO timestamp)
       if (media.transcript) {
         const tr = document.createElement("div");
         tr.className = `bubble ${side} inGroup`;
@@ -312,7 +324,7 @@
 
         const t = document.createElement("div");
         t.className = "transcript";
-        t.textContent = media.transcript; // line breaks preserved by pre-wrap [web:554]
+        t.textContent = media.transcript;
 
         details.appendChild(summary);
         details.appendChild(t);
