@@ -16,6 +16,8 @@
       --border: #e5e7eb;
       --accent: #25d366;
       --btn: #0b74ff;
+      --danger: #ef4444;
+      --dark: #111827;
     }
 
     body{
@@ -44,6 +46,20 @@
     #status{
       font-size: 13px;
       color: var(--muted);
+    }
+
+    #topActions{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    #callState{
+      font-size: 12px;
+      color: var(--muted);
+      user-select: none;
     }
 
     #messages{
@@ -179,10 +195,15 @@
       line-height: 1;
       user-select: none;
       flex: 0 0 auto;
+      color: #fff;
     }
 
-    #uploadBtn{ background: var(--btn); color: #fff; }
-    #send{ background: var(--accent); color: #fff; }
+    #uploadBtn{ background: var(--btn); }
+    #send{ background: var(--accent); }
+
+    #acceptBtn{ background: var(--accent); }
+    #rejectBtn{ background: var(--danger); }
+    #hangupBtn{ background: var(--danger); }
 
     .iconBtn:disabled{
       opacity: 0.6;
@@ -197,11 +218,35 @@
       opacity: 0.01;
     }
 
+    /* Incoming call banner */
+    #incoming{
+      display: none;
+      padding: 10px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #incomingText{
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    #incomingBtns{
+      display: inline-flex;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
     @media (max-width: 520px){
       #messages{ padding: 10px 8px; gap: 6px; }
       .bubble{ max-width: 92%; }
       .group{ max-width: 92%; }
       .iconBtn{ width: 38px; height: 38px; }
+      #topbar{ gap: 8px; }
+      #topActions{ gap: 6px; }
     }
   </style>
 </head>
@@ -212,10 +257,22 @@
       <div>
         <div style="font-weight:700">Chat</div>
         <div id="status">Disconnected</div>
+        <div id="callState">No call</div>
       </div>
 
-      <div style="font-size:12px;color:var(--muted)">
-        Room: <span id="roomLabel"></span> | Role: <span id="roleLabel"></span>
+      <div id="topActions">
+        <div style="font-size:12px;color:var(--muted)">
+          Room: <span id="roomLabel"></span> | Role: <span id="roleLabel"></span>
+        </div>
+        <button id="hangupBtn" class="iconBtn" title="Hang up" disabled>✕</button>
+      </div>
+    </div>
+
+    <div id="incoming">
+      <div id="incomingText">Incoming call…</div>
+      <div id="incomingBtns">
+        <button id="acceptBtn" class="iconBtn" title="Accept">✓</button>
+        <button id="rejectBtn" class="iconBtn" title="Reject">✕</button>
       </div>
     </div>
 
@@ -227,6 +284,8 @@
       <button id="uploadBtn" class="iconBtn" title="Upload">📎</button>
       <button id="send" class="iconBtn" title="Send">➤</button>
     </div>
+
+    <audio id="remoteAudio" autoplay></audio>
   </div>
 
   <script src="https://chat-server-orzm.onrender.com/socket.io/socket.io.js"></script>
@@ -242,14 +301,23 @@
 
     const messagesEl = document.getElementById("messages");
     const statusEl = document.getElementById("status");
+    const callStateEl = document.getElementById("callState");
+
     const inputEl = document.getElementById("msg");
     const sendBtn = document.getElementById("send");
     const fileEl = document.getElementById("file");
     const uploadBtn = document.getElementById("uploadBtn");
 
+    const incomingEl = document.getElementById("incoming");
+    const acceptBtn = document.getElementById("acceptBtn");
+    const rejectBtn = document.getElementById("rejectBtn");
+    const hangupBtn = document.getElementById("hangupBtn");
+    const remoteAudio = document.getElementById("remoteAudio");
+
     const socket = io(SERVER_URL);
 
     function setStatus(text) { statusEl.textContent = text; }
+    function setCallState(text) { callStateEl.textContent = text; }
     function formatTime(ts) {
       return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
@@ -284,7 +352,7 @@
       title.textContent = "Voice message";
 
       const audio = document.createElement("audio");
-      audio.controls = true; // native controls [web:404]
+      audio.controls = true;
       audio.preload = "none";
       audio.src = media.audioUrl;
 
@@ -338,7 +406,7 @@
       uploadBtn.disabled = true;
       try {
         const fd = new FormData();
-        fd.append("file", fileEl.files[0]); // FormData upload [web:750]
+        fd.append("file", fileEl.files[0]);
 
         const resp = await fetch(`${UPLOAD_BASE}/upload`, { method: "POST", body: fd });
         if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
@@ -355,6 +423,160 @@
       }
     }
 
+    // ---------------- WebRTC audio call (Customer = callee) ----------------
+    let pc = null;
+    let localStream = null;
+    let pendingIce = [];
+    let inCall = false;
+
+    let pendingOffer = null;
+
+    const rtcConfig = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" }
+      ]
+    };
+
+    function setCallUi(active) {
+      inCall = active;
+      hangupBtn.disabled = !active;
+      setCallState(active ? "In call…" : "No call");
+    }
+
+    function showIncoming(show) {
+      incomingEl.style.display = show ? "flex" : "none";
+    }
+
+    async function ensurePeerConnection() {
+      if (pc) return pc;
+
+      pc = new RTCPeerConnection(rtcConfig); // [web:754]
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("call:ice", { candidate: event.candidate });
+        }
+      }; // [web:795]
+
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          remoteAudio.srcObject = event.streams[0];
+        }
+      };
+
+      return pc;
+    }
+
+    async function startLocalAudio() {
+      if (localStream) return localStream;
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true }); // [web:761]
+      return localStream;
+    }
+
+    async function addLocalTracks() {
+      const pc = await ensurePeerConnection();
+      const stream = await startLocalAudio();
+      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+    }
+
+    function cleanupCall() {
+      setCallUi(false);
+      showIncoming(false);
+      pendingOffer = null;
+
+      if (pc) {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.close();
+        pc = null;
+      }
+
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+        localStream = null;
+      }
+
+      pendingIce = [];
+      remoteAudio.srcObject = null;
+    }
+
+    socket.on("call:offer", ({ sdp, from } = {}) => {
+      if (!sdp) return;
+      if (inCall) {
+        // already in a call: reject by hanging up
+        socket.emit("call:hangup", {});
+        return;
+      }
+      pendingOffer = { sdp, from: from || "unknown" };
+      showIncoming(true);
+      setCallState("Incoming call…");
+      addBubble("them", "Incoming call…");
+    });
+
+    acceptBtn.addEventListener("click", async () => {
+      try {
+        if (!pendingOffer?.sdp) return;
+
+        setCallUi(true);
+        showIncoming(false);
+        setCallState("Connecting…");
+
+        await ensurePeerConnection();
+        await addLocalTracks();
+
+        await pc.setRemoteDescription(pendingOffer.sdp); // [web:793]
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer); // [web:792]
+
+        socket.emit("call:answer", { sdp: pc.localDescription });
+
+        for (const c of pendingIce) await pc.addIceCandidate(c);
+        pendingIce = [];
+
+        setCallState("Connected");
+        addBubble("me", "Call connected");
+      } catch (e) {
+        addBubble("me", `Call accept failed: ${e.message}`);
+        cleanupCall();
+      }
+    });
+
+    rejectBtn.addEventListener("click", () => {
+      socket.emit("call:hangup", {});
+      addBubble("me", "Call rejected");
+      cleanupCall();
+    });
+
+    hangupBtn.addEventListener("click", () => {
+      socket.emit("call:hangup", {});
+      addBubble("me", "Call ended");
+      cleanupCall();
+    });
+
+    socket.on("call:answer", async () => {
+      // Customer is callee; should not receive answer in normal flow, ignore safely
+    });
+
+    socket.on("call:ice", async ({ candidate } = {}) => {
+      try {
+        if (!candidate) return;
+        if (!pc || !pc.remoteDescription) {
+          pendingIce.push(candidate);
+          return;
+        }
+        await pc.addIceCandidate(candidate);
+      } catch (e) {
+        addBubble("me", `ICE error: ${e.message}`);
+      }
+    });
+
+    socket.on("call:hangup", ({ from } = {}) => {
+      cleanupCall();
+      addBubble("them", `Call ended${from ? ` by ${from}` : ""}`);
+    });
+
+    // ---------------- Socket.IO connect + chat ----------------
     socket.on("connect", () => {
       setStatus("Connected");
       socket.emit("join", { room, role });
@@ -381,7 +603,7 @@
       if (e.key === "Enter") sendCurrent();
     });
 
-    uploadBtn.addEventListener("click", () => fileEl.click()); // trigger picker [web:742]
+    uploadBtn.addEventListener("click", () => fileEl.click());
     fileEl.addEventListener("change", uploadSelectedFile);
   </script>
 </body>
