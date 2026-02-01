@@ -171,8 +171,7 @@
     <audio id="remoteAudio" autoplay></audio>
   </div>
 
-  <!-- Socket.IO client served by your Socket.IO server at /socket.io/socket.io.js -->
-  <script src="https://natisha-flamy-lonely.ngrok-free.dev/socket.io/socket.io.js"></script> <!-- [web:1068] -->
+  <script src="https://natisha-flamy-lonely.ngrok-free.dev/socket.io/socket.io.js"></script>
 
   <script>
     const BASE_URL = "https://natisha-flamy-lonely.ngrok-free.dev";
@@ -290,8 +289,6 @@
         if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
 
         const out = await resp.json();
-
-        // Keep simple message; your watcher.js sends the real media JSON when WAV+TXT exist.
         socket.emit("chat", { room, text: `File uploaded: ${out.originalName}` });
       } catch (err) {
         addBubble("me", `Upload error: ${err.message}`);
@@ -301,8 +298,19 @@
       }
     }
 
+    // Same mapper as agent (keep identical text)
+    function callEndMessage(reason) {
+      switch (reason) {
+        case "rejected":  return "Call cancelled";
+        case "canceled":  return "Call cancelled";
+        case "no_answer": return "Missed call";
+        case "ended":
+        default:          return "Call ended";
+      }
+    }
+
     // ---- Socket.IO ----
-    const socket = io(SERVER_URL, { transports: ["websocket", "polling"] }); // options supported [web:1009]
+    const socket = io(SERVER_URL, { transports: ["websocket", "polling"] });
 
     socket.on("connect", () => {
       setStatus("Connected");
@@ -315,30 +323,33 @@
     socket.on("connect_error", (err) => {
       setStatus("Connect error: " + (err?.message || err));
       console.log("connect_error:", err);
-    }); // troubleshooting recommended [web:819]
+    });
 
     // ---- WebRTC (Customer callee) ----
     let pc = null;
     let localStream = null;
     let pendingIce = [];
     let incomingOffer = null;
+    let inCall = false;
 
     const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
     function setCallUi(state) {
-      // "idle" | "incoming" | "inCall"
       if (state === "idle") {
         answerBtn.disabled = true;
         hangupBtn.disabled = true;
         setCallState("No call");
+        inCall = false;
       } else if (state === "incoming") {
         answerBtn.disabled = false;
         hangupBtn.disabled = false;
         setCallState("Incoming call…");
+        inCall = false;
       } else {
         answerBtn.disabled = true;
         hangupBtn.disabled = false;
         setCallState("In call…");
+        inCall = true;
       }
     }
 
@@ -395,10 +406,10 @@
         setCallUi("inCall");
 
         await ensurePeerConnection();
-        await pc.setRemoteDescription(incomingOffer); // sets remote offer [web:1008]
+        await pc.setRemoteDescription(incomingOffer);
         await addLocalTracks();
 
-        const answer = await pc.createAnswer(); // creates SDP answer [web:1075]
+        const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
         socket.emit("call:answer", { sdp: pc.localDescription });
@@ -412,8 +423,11 @@
     });
 
     hangupBtn.addEventListener("click", () => {
-      socket.emit("call:hangup", {});
+      // If user hangs up before answering => rejected, else ended
+      const reason = (incomingOffer && !inCall) ? "rejected" : "ended";
+      socket.emit("call:hangup", { reason });
       cleanupCall();
+      addBubble("them", callEndMessage(reason));
     });
 
     socket.on("call:ice", async ({ candidate } = {}) => {
@@ -426,9 +440,9 @@
       }
     });
 
-    socket.on("call:hangup", () => {
+    socket.on("call:hangup", ({ reason } = {}) => {
       cleanupCall();
-      addBubble("them", "Call ended");
+      addBubble("them", callEndMessage(reason || "ended"));
     });
 
     // ---- Chat rendering ----
