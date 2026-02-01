@@ -228,7 +228,7 @@
 
       const title = document.createElement("div");
       title.className = "title";
-      title.textContent = "Voice message";
+      title.textContent = media.title || "Voice message";
 
       const audio = document.createElement("audio");
       audio.controls = true;
