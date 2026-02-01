@@ -14,8 +14,6 @@
       --me: #dcf8c6;
       --them: #ffffff;
       --border: #e5e7eb;
-
-      --audioBubbleWidth: 360px; /* keep controls visible on laptop + mobile */
     }
 
     body{
@@ -92,9 +90,8 @@
       user-select: none;
     }
 
-    /* Group: keeps transcript bubble exactly same width as voice bubble */
     .group{
-      display: inline-block; /* shrink-wrap width to voice bubble */
+      display: inline-block;
       max-width: 72%;
     }
     .group.me{ align-self: flex-end; }
@@ -104,19 +101,11 @@
       max-width: 100%;
       width: 100%;
       box-sizing: border-box;
-      box-shadow: 0 1px 0 rgba(0,0,0,.06);
     }
 
-    /* Fixed “controls visible” voice bubble width */
-    .bubble.voice{
-      width: var(--audioBubbleWidth);
-      max-width: 100%;
-    }
-
-    /* WhatsApp-like attached stacking */
     .group .bubble.inGroup{ margin: 0; }
     .group .bubble.inGroup + .bubble.inGroup{
-      margin-top: 2px;     /* set 0 for fully fused */
+      margin-top: 2px;
       box-shadow: none;
     }
 
@@ -126,14 +115,13 @@
     .group.them .bubble.inGroup:first-child{ border-bottom-left-radius: 6px; }
     .group.them .bubble.inGroup:last-child{  border-top-left-radius: 6px; }
 
-    /* Audio control fills the voice bubble */
     audio{
-      width: 100%;
+      width: 320px;
+      max-width: 100%;
       height: 36px;
       display: block;
     }
 
-    /* Transcript disclosure */
     .tx > summary{
       cursor: pointer;
       user-select: none;
@@ -201,7 +189,6 @@
       font-size: 13px;
     }
 
-    /* Mobile */
     @media (max-width: 520px){
       #messages{
         padding: 10px 8px;
@@ -303,25 +290,17 @@
       const group = document.createElement("div");
       group.className = `group ${side}`;
 
-      // Voice bubble (has timestamp) + fixed width via .voice
       const voice = document.createElement("div");
-      voice.className = `bubble ${side} inGroup voice`;
+      voice.className = `bubble ${side} inGroup`;
 
       const title = document.createElement("div");
       title.className = "title";
       title.textContent = "Voice message";
 
       const audio = document.createElement("audio");
-      audio.crossOrigin = "anonymous"; // enable CORS mode for cross-origin media [web:696]
-      audio.controls = true;
-      audio.preload = "metadata";
-
-      // Use <source> with explicit type (WAV) [web:404]
-      const src = document.createElement("source");
-      src.src = media.audioUrl;
-      src.type = "audio/wav";
-
-      audio.appendChild(src);
+      audio.controls = true; // browser-native controls [web:404]
+      audio.preload = "none";
+      audio.src = media.audioUrl;
 
       const meta = document.createElement("div");
       meta.className = "meta";
@@ -332,7 +311,6 @@
       voice.appendChild(meta);
       group.appendChild(voice);
 
-      // Transcript bubble (NO timestamp)
       if (media.transcript) {
         const tr = document.createElement("div");
         tr.className = `bubble ${side} inGroup`;
@@ -396,11 +374,13 @@
     }
 
     socket.on("connect", () => {
-      setStatus("Connected");
+      document.getElementById("status").textContent = "Connected";
       socket.emit("join", { room, role });
     });
 
-    socket.on("disconnect", () => setStatus("Disconnected"));
+    socket.on("disconnect", () => {
+      document.getElementById("status").textContent = "Disconnected";
+    });
 
     socket.on("chat", (m) => {
       const side = (m.from === role) ? "me" : "them";
