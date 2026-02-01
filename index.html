@@ -14,6 +14,8 @@
       --me: #dcf8c6;
       --them: #ffffff;
       --border: #e5e7eb;
+      --accent: #25d366;
+      --btn: #0b74ff;
     }
 
     body{
@@ -132,15 +134,12 @@
       list-style: none;
     }
     .tx > summary::-webkit-details-marker{ display: none; }
-
     .tx > summary::before{
       content: "▸";
       display: inline-block;
       transition: transform 0.12s ease;
     }
-    .tx[open] > summary::before{
-      transform: rotate(90deg);
-    }
+    .tx[open] > summary::before{ transform: rotate(90deg); }
 
     .transcript{
       margin-top: 6px;
@@ -152,70 +151,57 @@
       background: var(--panel);
       border-top: 1px solid var(--border);
       display: flex;
-      gap: 10px;
       align-items: center;
+      gap: 8px;
+      flex-wrap: nowrap;
     }
 
     #msg{
-      flex: 1;
+      flex: 1 1 auto;
+      min-width: 0;
       font-size: 15px;
       padding: 10px 12px;
       border: 1px solid var(--border);
       border-radius: 999px;
       outline: none;
-      min-width: 180px;
     }
 
-    #send, #uploadBtn{
-      border: none;
-      color: white;
-      padding: 10px 14px;
+    .iconBtn{
+      width: 40px;
+      height: 40px;
       border-radius: 999px;
+      border: none;
       cursor: pointer;
-      font-weight: 600;
-      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      line-height: 1;
+      user-select: none;
+      flex: 0 0 auto;
     }
 
-    #send{ background: #25d366; }
-    #uploadBtn{ background: #0b74ff; }
+    #uploadBtn{ background: var(--btn); color: #fff; }
+    #send{ background: var(--accent); color: #fff; }
 
-    #send:disabled, #uploadBtn:disabled{
+    .iconBtn:disabled{
       opacity: 0.6;
       cursor: not-allowed;
     }
 
     #file{
-      max-width: 220px;
-      font-size: 13px;
+      position: absolute;
+      left: -9999px;
+      width: 1px;
+      height: 1px;
+      opacity: 0.01;
     }
 
     @media (max-width: 520px){
-      #messages{
-        padding: 10px 8px;
-        gap: 6px;
-      }
-
+      #messages{ padding: 10px 8px; gap: 6px; }
       .bubble{ max-width: 92%; }
       .group{ max-width: 92%; }
-
-      #composer{
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      #msg{
-        flex: 1 1 100%;
-        min-width: 0;
-      }
-
-      #file{
-        flex: 1 1 100%;
-        max-width: 100%;
-      }
-
-      #uploadBtn, #send{
-        flex: 1 1 calc(50% - 4px);
-      }
+      .iconBtn{ width: 38px; height: 38px; }
     }
   </style>
 </head>
@@ -238,8 +224,8 @@
     <div id="composer">
       <input id="msg" placeholder="Type a message…" autocomplete="off" />
       <input id="file" type="file" />
-      <button id="uploadBtn">Upload</button>
-      <button id="send">Send</button>
+      <button id="uploadBtn" class="iconBtn" title="Upload">📎</button>
+      <button id="send" class="iconBtn" title="Send">➤</button>
     </div>
   </div>
 
@@ -298,7 +284,7 @@
       title.textContent = "Voice message";
 
       const audio = document.createElement("audio");
-      audio.controls = true; // browser-native controls [web:404]
+      audio.controls = true; // native controls [web:404]
       audio.preload = "none";
       audio.src = media.audioUrl;
 
@@ -346,16 +332,13 @@
       inputEl.focus();
     }
 
-    async function uploadCurrentFile() {
-      if (!fileEl.files || fileEl.files.length === 0) {
-        addBubble("me", "No file selected.");
-        return;
-      }
+    async function uploadSelectedFile() {
+      if (!fileEl.files || fileEl.files.length === 0) return;
 
       uploadBtn.disabled = true;
       try {
         const fd = new FormData();
-        fd.append("file", fileEl.files[0]);
+        fd.append("file", fileEl.files[0]); // FormData upload [web:750]
 
         const resp = await fetch(`${UPLOAD_BASE}/upload`, { method: "POST", body: fd });
         if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
@@ -364,23 +347,20 @@
 
         addBubble("me", `Uploaded: ${out.originalName} (${out.bytes} bytes)`);
         socket.emit("chat", { room, text: `File uploaded: ${out.originalName}` });
-
-        fileEl.value = "";
       } catch (err) {
         addBubble("me", `Upload error: ${err.message}`);
       } finally {
+        fileEl.value = "";
         uploadBtn.disabled = false;
       }
     }
 
     socket.on("connect", () => {
-      document.getElementById("status").textContent = "Connected";
+      setStatus("Connected");
       socket.emit("join", { room, role });
     });
 
-    socket.on("disconnect", () => {
-      document.getElementById("status").textContent = "Disconnected";
-    });
+    socket.on("disconnect", () => setStatus("Disconnected"));
 
     socket.on("chat", (m) => {
       const side = (m.from === role) ? "me" : "them";
@@ -401,7 +381,8 @@
       if (e.key === "Enter") sendCurrent();
     });
 
-    uploadBtn.addEventListener("click", uploadCurrentFile);
+    uploadBtn.addEventListener("click", () => fileEl.click()); // trigger picker [web:742]
+    fileEl.addEventListener("change", uploadSelectedFile);
   </script>
 </body>
 </html>
