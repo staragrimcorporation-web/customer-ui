@@ -173,10 +173,12 @@
     <audio id="remoteAudio" autoplay></audio>
   </div>
 
-  <script>
-    const BASE = "https://natisha-flamy-lonely.ngrok-free.dev";
-    document.write(`<script src="${BASE}/socket.io/socket.io.js"><\/script>`);
-  </script>
+
+<script src="https://natisha-flamy-lonely.ngrok-free.dev/socket.io/socket.io.js"></script>
+ // <script>
+   // const BASE = "https://natisha-flamy-lonely.ngrok-free.dev";
+   // document.write(`<script src="${BASE}/socket.io/socket.io.js"><\/script>`);
+  // </script>
 
   <script>
     const BASE_URL = "https://natisha-flamy-lonely.ngrok-free.dev";
@@ -203,7 +205,13 @@
     const remoteAudio = document.getElementById("remoteAudio");
 
     const socket = io(SERVER_URL);
-
+console.log("Customer starting, SERVER_URL=", SERVER_URL);
+	console.log("connect_error:", err?.message, err);
+ 	setStatus("Connect error: " + (err?.message || err));
+});
+socket.on("error", (err) => {
+console.log("socket error:", err);
+});
     function setStatus(text) { statusEl.textContent = text; }
     function setCallState(text) { callStateEl.textContent = text; }
     function formatTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
@@ -280,7 +288,7 @@
       const text = inputEl.value.trim();
       if (!text) return;
 
-      addBubble("me", text);
+      //addBubble("me", text);
       socket.emit("chat", { room, text });
       inputEl.value = "";
       inputEl.focus();
@@ -299,7 +307,7 @@
 
         const out = await resp.json();
 
-        addBubble("me", `Uploaded: ${out.originalName} (${out.bytes} bytes)`);
+        //addBubble("me", `Uploaded: ${out.originalName} (${out.bytes} bytes)`);
         socket.emit("chat", { room, text: `File uploaded: ${out.originalName}` });
       } catch (err) {
         addBubble("me", `Upload error: ${err.message}`);
