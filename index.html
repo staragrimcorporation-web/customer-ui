@@ -130,6 +130,10 @@
     #file{ position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0.01; }
     #callState{ font-size: 12px; color: var(--muted); user-select: none; }
 
+    /* Email notification styling */
+    .emailCard .kv{ font-size:12px; color: var(--muted); margin-top:6px; }
+    .emailCard .kv div{ margin-top:2px; }
+
     @media (max-width: 520px){
       #messages{ padding: 10px 8px; gap: 6px; }
       .bubble{ max-width: 92%; }
@@ -269,6 +273,49 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    // Email notification card using <details>/<summary> pattern [web:257][web:260]
+    function addEmailCard(side, email, ts = Date.now()) {
+      const group = document.createElement("div");
+      group.className = `group ${side}`;
+
+      const card = document.createElement("div");
+      card.className = `bubble ${side} inGroup emailCard`;
+
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = `${email.icon || "📧"} New email`;
+
+      const headline = document.createElement("div");
+      const subj = email.subject || "(no subject)";
+      const sum = email.summary ? ` — ${email.summary}` : "";
+      headline.textContent = subj + sum;
+
+      const kv = document.createElement("div");
+      kv.className = "kv";
+
+      const from = document.createElement("div");
+      from.textContent = `From: ${email.from || "-"}`;
+
+      const date = document.createElement("div");
+      date.textContent = `Date: ${email.date || "-"}`;
+
+      kv.appendChild(from);
+      kv.appendChild(date);
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = formatTime(ts);
+
+      card.appendChild(title);
+      card.appendChild(headline);
+      card.appendChild(kv);
+      card.appendChild(meta);
+
+      group.appendChild(card);
+      messagesEl.appendChild(group);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
     function sendCurrent() {
       const text = inputEl.value.trim();
       if (!text) return;
@@ -298,7 +345,6 @@
       }
     }
 
-    // Same mapper as agent (keep identical text)
     function callEndMessage(reason) {
       switch (reason) {
         case "rejected":  return "Call cancelled";
@@ -423,7 +469,6 @@
     });
 
     hangupBtn.addEventListener("click", () => {
-      // If user hangs up before answering => rejected, else ended
       const reason = (incomingOffer && !inCall) ? "rejected" : "ended";
       socket.emit("call:hangup", { reason });
       cleanupCall();
@@ -455,6 +500,8 @@
 
       if (obj?.type === "media" && typeof obj.audioUrl === "string") {
         addMediaGroup(side, obj, ts);
+      } else if (obj?.type === "email") {
+        addEmailCard(side, obj, ts);
       } else {
         addBubble(side, m.text, ts);
       }
