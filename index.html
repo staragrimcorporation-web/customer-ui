@@ -130,7 +130,6 @@
     #file{ position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0.01; }
     #callState{ font-size: 12px; color: var(--muted); user-select: none; }
 
-    /* Email notification styling */
     .emailCard .kv{ font-size:12px; color: var(--muted); margin-top:6px; }
     .emailCard .kv div{ margin-top:2px; }
 
@@ -182,11 +181,20 @@
     const SERVER_URL = BASE_URL;
     const UPLOAD_BASE = BASE_URL;
 
-    const room = "room-123";
+    const LOBBY_ROOM = "room-123";
     const role = "B";
 
-    document.getElementById("roomLabel").textContent = room;
-    document.getElementById("roleLabel").textContent = role;
+    const qs = new URLSearchParams(location.search);
+    const resumeChatId = qs.get("chatId");
+
+    let currentRoom = resumeChatId || LOBBY_ROOM;
+
+    const roomLabelEl = document.getElementById("roomLabel");
+    const roleLabelEl = document.getElementById("roleLabel");
+    roleLabelEl.textContent = role;
+
+    function updateRoomLabel() { roomLabelEl.textContent = currentRoom; }
+    updateRoomLabel();
 
     const messagesEl = document.getElementById("messages");
     const statusEl = document.getElementById("status");
@@ -273,7 +281,6 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
-    // Email notification card using <details>/<summary> pattern [web:257][web:260]
     function addEmailCard(side, email, ts = Date.now()) {
       const group = document.createElement("div");
       group.className = `group ${side}`;
@@ -316,10 +323,34 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    function clearMessages() { messagesEl.innerHTML = ""; }
+
+    async function loadHistory(chatId) {
+      if (!chatId) return;
+      const resp = await fetch(`${BASE_URL}/sessions/${encodeURIComponent(chatId)}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      clearMessages();
+
+      for (const ev of (data.events || [])) {
+        if (ev.type !== "chat") continue;
+        const side = (ev.from === role) ? "me" : "them";
+        const ts = ev.ts || Date.now();
+
+        let obj = null;
+        try { obj = JSON.parse(ev.text); } catch {}
+
+        if (obj?.type === "media" && typeof obj.audioUrl === "string") addMediaGroup(side, obj, ts);
+        else if (obj?.type === "email") addEmailCard(side, obj, ts);
+        else addBubble(side, ev.text, ts);
+      }
+    }
+
     function sendCurrent() {
       const text = inputEl.value.trim();
       if (!text) return;
-      socket.emit("chat", { room, text });
+      socket.emit("chat", { room: currentRoom, text });
       inputEl.value = "";
       inputEl.focus();
     }
@@ -336,7 +367,7 @@
         if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
 
         const out = await resp.json();
-        socket.emit("chat", { room, text: `File uploaded: ${out.originalName}` });
+        socket.emit("chat", { room: currentRoom, text: `File uploaded: ${out.originalName}` });
       } catch (err) {
         addBubble("me", `Upload error: ${err.message}`);
       } finally {
@@ -357,19 +388,6 @@
 
     // ---- Socket.IO ----
     const socket = io(SERVER_URL, { transports: ["websocket", "polling"] });
-
-    socket.on("connect", () => {
-      setStatus("Connected");
-      socket.emit("join", { room, role });
-      setCallUi("idle");
-    });
-
-    socket.on("disconnect", () => setStatus("Disconnected"));
-
-    socket.on("connect_error", (err) => {
-      setStatus("Connect error: " + (err?.message || err));
-      console.log("connect_error:", err);
-    });
 
     // ---- WebRTC (Customer callee) ----
     let pc = null;
@@ -405,7 +423,7 @@
       pc = new RTCPeerConnection(rtcConfig);
 
       pc.onicecandidate = (event) => {
-        if (event.candidate) socket.emit("call:ice", { candidate: event.candidate });
+        if (event.candidate) socket.emit("call:ice", { room: currentRoom, candidate: event.candidate });
       };
 
       pc.ontrack = (event) => {
@@ -448,6 +466,10 @@
     answerBtn.addEventListener("click", async () => {
       try {
         if (!incomingOffer) return;
+        if (currentRoom === LOBBY_ROOM) {
+          addBubble("me", "Wait for session to start before answering.");
+          return;
+        }
 
         setCallUi("inCall");
 
@@ -458,7 +480,7 @@
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
-        socket.emit("call:answer", { sdp: pc.localDescription });
+        socket.emit("call:answer", { room: currentRoom, sdp: pc.localDescription });
 
         for (const c of pendingIce) await pc.addIceCandidate(c);
         pendingIce = [];
@@ -470,7 +492,7 @@
 
     hangupBtn.addEventListener("click", () => {
       const reason = (incomingOffer && !inCall) ? "rejected" : "ended";
-      socket.emit("call:hangup", { reason });
+      socket.emit("call:hangup", { room: currentRoom, reason });
       cleanupCall();
       addBubble("them", callEndMessage(reason));
     });
@@ -490,6 +512,28 @@
       addBubble("them", callEndMessage(reason || "ended"));
     });
 
+    socket.on("session:started", async ({ chatId } = {}) => {
+      if (!chatId) return;
+      currentRoom = chatId;
+      updateRoomLabel();
+      socket.emit("join", { room: currentRoom, role });
+      await loadHistory(currentRoom);
+    });
+
+    socket.on("connect", async () => {
+      setStatus("Connected");
+      socket.emit("join", { room: currentRoom, role });
+      setCallUi("idle");
+      if (resumeChatId) await loadHistory(resumeChatId);
+    });
+
+    socket.on("disconnect", () => setStatus("Disconnected"));
+
+    socket.on("connect_error", (err) => {
+      setStatus("Connect error: " + (err?.message || err));
+      console.log("connect_error:", err);
+    });
+
     // ---- Chat rendering ----
     socket.on("chat", (m) => {
       const side = (m.from === role) ? "me" : "them";
@@ -498,13 +542,9 @@
       let obj = null;
       try { obj = JSON.parse(m.text); } catch {}
 
-      if (obj?.type === "media" && typeof obj.audioUrl === "string") {
-        addMediaGroup(side, obj, ts);
-      } else if (obj?.type === "email") {
-        addEmailCard(side, obj, ts);
-      } else {
-        addBubble(side, m.text, ts);
-      }
+      if (obj?.type === "media" && typeof obj.audioUrl === "string") addMediaGroup(side, obj, ts);
+      else if (obj?.type === "email") addEmailCard(side, obj, ts);
+      else addBubble(side, m.text, ts);
     });
 
     sendBtn.addEventListener("click", sendCurrent);
