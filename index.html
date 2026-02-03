@@ -181,6 +181,9 @@
     const SERVER_URL = BASE_URL;
     const UPLOAD_BASE = BASE_URL;
 
+    const HISTORY_BASE = BASE_URL; // must be public (customer is on render)
+    const SESSIONS_PAGE_ORIGIN = "http://localhost:5500"; // verify sender origin for postMessage [web:278]
+
     const LOBBY_ROOM = "room-123";
     const role = "B";
 
@@ -326,10 +329,31 @@
     function clearMessages() { messagesEl.innerHTML = ""; }
 
     async function loadHistory(chatId) {
-      if (!chatId) return;
-      const resp = await fetch(`${BASE_URL}/sessions/${encodeURIComponent(chatId)}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
+      if (!chatId || chatId === LOBBY_ROOM) return;
+
+      const url = `${HISTORY_BASE}/sessions/${encodeURIComponent(chatId)}?ts=${Date.now()}`;
+      const resp = await fetch(url, {
+        cache: "no-store",
+        headers: { "ngrok-skip-browser-warning": "1" }
+      });
+
+      const ct = resp.headers.get("content-type") || "";
+      const raw = await resp.text();
+
+      if (!resp.ok) {
+        addBubble("them", `History load failed: HTTP ${resp.status}`);
+        return;
+      }
+      if (!ct.includes("application/json")) {
+        addBubble("them", `History not JSON (ct=${ct}). First chars: ${raw.slice(0, 60)}`);
+        return;
+      }
+
+      let data;
+      try { data = JSON.parse(raw); } catch {
+        addBubble("them", `History parse error. First chars: ${raw.slice(0, 60)}`);
+        return;
+      }
 
       clearMessages();
 
@@ -517,6 +541,7 @@
       currentRoom = chatId;
       updateRoomLabel();
       socket.emit("join", { room: currentRoom, role });
+      history.replaceState(null, "", `?chatId=${encodeURIComponent(currentRoom)}`);
       await loadHistory(currentRoom);
     });
 
@@ -546,6 +571,25 @@
       else if (obj?.type === "email") addEmailCard(side, obj, ts);
       else addBubble(side, m.text, ts);
     });
+
+    // ---- sessions.html -> Customer sync ----
+    window.addEventListener("message", async (ev) => {
+      if (ev.origin !== SESSIONS_PAGE_ORIGIN) return; // verify origin [web:278]
+
+      const msg = ev.data || {};
+      if (msg.type !== "switchChat" || !msg.chatId) return;
+
+      currentRoom = msg.chatId;
+      updateRoomLabel();
+
+      socket.emit("join", { room: currentRoom, role });
+      history.replaceState(null, "", `?chatId=${encodeURIComponent(currentRoom)}`);
+      await loadHistory(currentRoom);
+
+      // stop any ringing/call state when switching rooms
+      cleanupCall();
+    });
+    // ---------------------------------------
 
     sendBtn.addEventListener("click", sendCurrent);
     inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") sendCurrent(); });
