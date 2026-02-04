@@ -130,7 +130,6 @@
     #file{ position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0.01; }
     #callState{ font-size: 12px; color: var(--muted); user-select: none; }
 
-    /* Email notification styling */
     .emailCard .kv{ font-size:12px; color: var(--muted); margin-top:6px; }
     .emailCard .kv div{ margin-top:2px; }
 
@@ -205,6 +204,13 @@
     function setCallState(text) { callStateEl.textContent = text; }
     function formatTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
 
+    function clearConversation() {
+      messagesEl.innerHTML = "";
+      // reset call UI state
+      setCallUi("idle");
+      incomingOffer = null;
+    }
+
     function addBubble(side, text, ts = Date.now()) {
       const bubble = document.createElement("div");
       bubble.className = `bubble ${side}`;
@@ -273,7 +279,6 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
-    // Email notification card using <details>/<summary> pattern [web:257][web:260]
     function addEmailCard(side, email, ts = Date.now()) {
       const group = document.createElement("div");
       group.className = `group ${side}`;
@@ -488,6 +493,12 @@
     socket.on("call:hangup", ({ reason } = {}) => {
       cleanupCall();
       addBubble("them", callEndMessage(reason || "ended"));
+    });
+
+    // ---- NEW: session ended ----
+    socket.on("session:ended", ({ reason } = {}) => {
+      clearConversation();
+      //addBubble("them", reason === "manual_by_agent" ? "Session ended." : "Session ended.");
     });
 
     // ---- Chat rendering ----
